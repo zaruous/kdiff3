@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "crates/diff-core",
+    "crates/kdiff3-app",
+]
+resolver = "2"
+
+[workspace.dependencies]
+similar = "2.6"
+tokio = { version = "1", features = ["full"] }
+eframe = "0.27"
+egui = "0.27"
+encoding_rs = "0.8"
+ignore = "0.4"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
