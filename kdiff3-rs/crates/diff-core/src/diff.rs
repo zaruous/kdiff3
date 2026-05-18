@@ -2,6 +2,13 @@ use similar::{ChangeTag, TextDiff};
 
 use crate::line_data::LineData;
 
+/// 비교 옵션 (공백/대소문자 무시)
+#[derive(Debug, Clone, Default)]
+pub struct DiffOptions {
+    pub ignore_whitespace: bool,
+    pub ignore_case: bool,
+}
+
 /// 입력 소스 선택자. A=파일1(base), B=파일2, C=파일3
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SrcSelector {
@@ -60,10 +67,28 @@ impl DiffList {
     pub fn from_lines(lines_a: &[LineData], lines_b: &[LineData]) -> Self {
         let text_a: Vec<&str> = lines_a.iter().map(|l| l.get_line()).collect();
         let text_b: Vec<&str> = lines_b.iter().map(|l| l.get_line()).collect();
+        Self::build_from_slices(&text_a, &text_b)
+    }
 
-        let diff = TextDiff::from_slices(&text_a, &text_b);
+    /// 옵션을 적용한 라인 단위 diff (공백/대소문자 무시 지원)
+    pub fn from_lines_with_options(lines_a: &[LineData], lines_b: &[LineData], opts: &DiffOptions) -> Self {
+        if !opts.ignore_whitespace && !opts.ignore_case {
+            return Self::from_lines(lines_a, lines_b);
+        }
+        let normalize = |s: &str| -> String {
+            let t = if opts.ignore_case { s.to_lowercase() } else { s.to_string() };
+            if opts.ignore_whitespace { t.split_whitespace().collect::<Vec<_>>().join(" ") } else { t }
+        };
+        let text_a: Vec<String> = lines_a.iter().map(|l| normalize(l.get_line())).collect();
+        let text_b: Vec<String> = lines_b.iter().map(|l| normalize(l.get_line())).collect();
+        let refs_a: Vec<&str> = text_a.iter().map(|s| s.as_str()).collect();
+        let refs_b: Vec<&str> = text_b.iter().map(|s| s.as_str()).collect();
+        Self::build_from_slices(&refs_a, &refs_b)
+    }
+
+    fn build_from_slices(text_a: &[&str], text_b: &[&str]) -> Self {
+        let diff = TextDiff::from_slices(text_a, text_b);
         let mut result = Vec::new();
-
         let mut nof_eq = 0usize;
         let mut del = 0usize;
         let mut ins = 0usize;

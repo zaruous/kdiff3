@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use diff_core::{DirDiff, DiffList, Merger, SourceData};
+use diff_core::{DirDiff, DiffList, DiffOptions, Merger, ResolvedChoice, SourceData};
 use eframe::egui;
 
 use crate::diff_view::DiffView;
@@ -39,6 +39,7 @@ pub struct KDiff3App {
 
     active_tab: ActiveTab,
     status: String,
+    options: DiffOptions,
 }
 
 impl KDiff3App {
@@ -66,6 +67,7 @@ impl KDiff3App {
             dir_view: DirView::new(),
             active_tab: ActiveTab::Diff,
             status: "파일 경로를 입력하고 '비교' 버튼을 누르세요.".to_string(),
+            options: DiffOptions::default(),
         };
 
         if file1.is_some() || file2.is_some() {
@@ -110,8 +112,8 @@ impl KDiff3App {
             return;
         };
 
-        let diff_ab = DiffList::from_lines(&a.lines, &b.lines);
-        let diff_ac = self.source_c.as_ref().map(|c| DiffList::from_lines(&a.lines, &c.lines));
+        let diff_ab = DiffList::from_lines_with_options(&a.lines, &b.lines, &self.options);
+        let diff_ac = self.source_c.as_ref().map(|c| DiffList::from_lines_with_options(&a.lines, &c.lines, &self.options));
 
         self.diff_view.set_sources(
             self.source_a.clone(),
@@ -218,6 +220,9 @@ impl KDiff3App {
                     if ui.button("비교").clicked() {
                         self.load_and_diff();
                     }
+                    ui.separator();
+                    ui.checkbox(&mut self.options.ignore_whitespace, "공백 무시");
+                    ui.checkbox(&mut self.options.ignore_case, "대소문자 무시");
                 });
             }
             ActiveTab::Dir => {
@@ -260,6 +265,27 @@ impl eframe::App for KDiff3App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // DirView에서 파일 열기 요청 처리 (매 프레임 체크)
         self.handle_open_request();
+
+        // 키보드 단축키 (Merge 탭에서만 활성)
+        if self.active_tab == ActiveTab::Merge {
+            let (next, prev, res_a, res_b, res_c, save) = ctx.input(|i| {
+                let ctrl = i.modifiers.ctrl;
+                (
+                    ctrl && i.key_pressed(egui::Key::ArrowDown),
+                    ctrl && i.key_pressed(egui::Key::ArrowUp),
+                    ctrl && i.key_pressed(egui::Key::Num1),
+                    ctrl && i.key_pressed(egui::Key::Num2),
+                    ctrl && i.key_pressed(egui::Key::Num3),
+                    ctrl && i.key_pressed(egui::Key::S),
+                )
+            });
+            if next  { self.merge_view.goto_next_conflict(); }
+            if prev  { self.merge_view.goto_prev_conflict(); }
+            if res_a { self.merge_view.resolve_current(ResolvedChoice::A); }
+            if res_b { self.merge_view.resolve_current(ResolvedChoice::B); }
+            if res_c { self.merge_view.resolve_current(ResolvedChoice::C); }
+            if save  { self.merge_view.save_output(); }
+        }
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             self.show_toolbar(ui);

@@ -1,10 +1,14 @@
 use diff_core::{DiffList, SourceData};
 use egui::{Color32, FontId, RichText, ScrollArea, Ui};
+use egui::text::LayoutJob;
 
 const COLOR_ONLY_A: Color32 = Color32::from_rgb(255, 200, 200);
 const COLOR_ONLY_B: Color32 = Color32::from_rgb(200, 225, 255);
 const COLOR_ONLY_C: Color32 = Color32::from_rgb(200, 255, 200);
 const COLOR_CHANGED: Color32 = Color32::from_rgb(255, 240, 180);
+// 단어 단위 변경 강조색 (라인 배경보다 진함)
+const COLOR_WORD_A: Color32 = Color32::from_rgb(220, 100, 100);
+const COLOR_WORD_B: Color32 = Color32::from_rgb(100, 140, 220);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LineKind {
@@ -112,35 +116,51 @@ impl DiffView {
                 };
 
                 ui.columns(col_count, |cols| {
-                    let text_a = if self.show_line_numbers {
-                        match line.num_a {
-                            Some(n) => format!("{:>4} │ {}", n, line.text_a),
-                            None => format!("     │"),
-                        }
+                    if line.kind == LineKind::ChangedAB {
+                        // 단어 단위 하이라이팅
+                        let job_a = word_diff_job(
+                            line.num_a, self.show_line_numbers, &font,
+                            &line.text_a, &line.text_b, true,
+                            COLOR_CHANGED, COLOR_WORD_A,
+                        );
+                        cols[0].add(egui::Label::new(job_a));
+                        let job_b = word_diff_job(
+                            line.num_b, self.show_line_numbers, &font,
+                            &line.text_a, &line.text_b, false,
+                            COLOR_CHANGED, COLOR_WORD_B,
+                        );
+                        cols[1].add(egui::Label::new(job_b));
                     } else {
-                        line.text_a.clone()
-                    };
-                    cols[0].add(egui::Label::new(
-                        RichText::new(text_a).font(font.clone()).background_color(bg_a),
-                    ));
+                        let text_a = if self.show_line_numbers {
+                            match line.num_a {
+                                Some(n) => format!("{:>4} │ {}", n, line.text_a),
+                                None => "     │".to_string(),
+                            }
+                        } else {
+                            line.text_a.clone()
+                        };
+                        cols[0].add(egui::Label::new(
+                            RichText::new(text_a).font(font.clone()).background_color(bg_a),
+                        ));
 
-                    let text_b = if self.show_line_numbers {
-                        match line.num_b {
-                            Some(n) => format!("{:>4} │ {}", n, line.text_b),
-                            None => format!("     │"),
-                        }
-                    } else {
-                        line.text_b.clone()
-                    };
-                    cols[1].add(egui::Label::new(
-                        RichText::new(text_b).font(font.clone()).background_color(bg_b),
-                    ));
+                        let text_b = if self.show_line_numbers {
+                            match line.num_b {
+                                Some(n) => format!("{:>4} │ {}", n, line.text_b),
+                                None => "     │".to_string(),
+                            }
+                        } else {
+                            line.text_b.clone()
+                        };
+                        cols[1].add(egui::Label::new(
+                            RichText::new(text_b).font(font.clone()).background_color(bg_b),
+                        ));
+                    }
 
                     if is_3way {
                         let text_c = if self.show_line_numbers {
                             match line.num_c {
                                 Some(n) => format!("{:>4} │ {}", n, line.text_c),
-                                None => format!("     │"),
+                                None => "     │".to_string(),
                             }
                         } else {
                             line.text_c.clone()
@@ -153,6 +173,54 @@ impl DiffView {
             }
         });
     }
+}
+
+/// ChangedAB 라인에 대한 단어 단위 LayoutJob 생성.
+/// is_a_side=true → A 쪽(삭제된 단어 강조), false → B 쪽(추가된 단어 강조).
+fn word_diff_job(
+    line_num: Option<usize>,
+    show_numbers: bool,
+    font: &FontId,
+    text_a: &str,
+    text_b: &str,
+    is_a_side: bool,
+    line_bg: Color32,
+    word_bg: Color32,
+) -> LayoutJob {
+    use similar::{ChangeTag, TextDiff};
+
+    let mut job = LayoutJob::default();
+
+    if show_numbers {
+        let prefix = match line_num {
+            Some(n) => format!("{:>4} │ ", n),
+            None => "     │".to_string(),
+        };
+        job.append(
+            &prefix,
+            0.0,
+            egui::TextFormat { font_id: font.clone(), background: line_bg, ..Default::default() },
+        );
+    }
+
+    let diff = TextDiff::from_words(text_a, text_b);
+    for change in diff.iter_all_changes() {
+        let (include, bg) = match (change.tag(), is_a_side) {
+            (ChangeTag::Equal, _) => (true, line_bg),
+            (ChangeTag::Delete, true) => (true, word_bg),
+            (ChangeTag::Insert, false) => (true, word_bg),
+            _ => (false, Color32::TRANSPARENT),
+        };
+        if include {
+            job.append(
+                change.value(),
+                0.0,
+                egui::TextFormat { font_id: font.clone(), background: bg, ..Default::default() },
+            );
+        }
+    }
+
+    job
 }
 
 fn build_diff_lines(

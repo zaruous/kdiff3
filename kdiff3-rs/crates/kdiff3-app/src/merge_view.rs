@@ -227,7 +227,7 @@ impl MergeView {
         }
     }
 
-    fn goto_next_conflict(&mut self) {
+    pub fn goto_next_conflict(&mut self) {
         if let Some(m) = &self.merger {
             let start = if self.current_conflict + 1 < m.blocks.len() {
                 self.current_conflict + 1
@@ -242,7 +242,7 @@ impl MergeView {
         }
     }
 
-    fn goto_prev_conflict(&mut self) {
+    pub fn goto_prev_conflict(&mut self) {
         if let Some(m) = &self.merger {
             if let Some(prev) = m.prev_conflict_before(self.current_conflict) {
                 self.current_conflict = prev;
@@ -250,13 +250,13 @@ impl MergeView {
         }
     }
 
-    fn resolve_current(&mut self, choice: ResolvedChoice) {
+    pub fn resolve_current(&mut self, choice: ResolvedChoice) {
         if let Some(m) = &mut self.merger {
             m.resolve(self.current_conflict, choice);
         }
     }
 
-    fn save_output(&mut self) {
+    pub fn save_output(&mut self) {
         let path = self.output_path.trim().to_string();
         if path.is_empty() {
             self.save_status = "✗ 출력 경로를 입력하세요.".to_string();

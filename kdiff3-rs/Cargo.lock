@@ -1925,6 +1925,7 @@ dependencies = [
  "diff-core",
  "eframe",
  "egui",
+ "similar",
  "tokio",
 ]
 
