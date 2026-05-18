@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { computeLineDiff, computeStats, DiffLine, DiffOptions } from './lib/diff'
 import { buildMerger, MergeResult, ResolvedChoice, resolveBlock, nextConflict, prevConflict } from './lib/merger'
 import { buildDirDiff, DirDiffResult } from './lib/dirDiff'
@@ -24,6 +24,8 @@ export default function App() {
   const [showLineNumbers, setShowLineNumbers] = useState(true)
   const [options, setOptions] = useState<DiffOptions>({ ignoreWhitespace: false, ignoreCase: false })
   const [status, setStatus] = useState('파일 경로를 입력하고 비교 버튼을 누르세요.')
+  const [scanProgress, setScanProgress] = useState<{ a: number; b: number; c: number } | null>(null)
+  const activeScanIds = useRef<string[]>([])
 
   // ── File comparison ─────────────────────────────────────────────────────────
 
@@ -58,6 +60,12 @@ export default function App() {
 
   // ── Directory comparison ────────────────────────────────────────────────────
 
+  const cancelDirScan = useCallback(() => {
+    for (const id of activeScanIds.current) window.api.scanDirCancel(id)
+    activeScanIds.current = []
+    setScanProgress(null)
+  }, [])
+
   const runDirDiff = useCallback(async (dp?: DirPathState) => {
     const dps = dp ?? dirPaths
     if (!dps.a.trim() || !dps.b.trim()) {
@@ -65,28 +73,60 @@ export default function App() {
       return
     }
 
-    const scanOrNull = async (p: string) => {
-      if (!p.trim()) return undefined
-      const r = await window.api.scanDir(p.trim())
-      if (!r.ok) { setStatus(`디렉토리 오류: ${r.error}`); return null }
-      return r.entries
+    cancelDirScan()
+
+    const idA = crypto.randomUUID()
+    const idB = crypto.randomUUID()
+    const idC = dps.c.trim() ? crypto.randomUUID() : null
+    activeScanIds.current = idC ? [idA, idB, idC] : [idA, idB]
+
+    const counts = { a: 0, b: 0, c: 0 }
+    setScanProgress({ ...counts })
+    setStatus('스캔 중…')
+
+    const cleanup = window.api.onScanProgress((data) => {
+      if (data.scanId === idA) counts.a = data.count
+      else if (data.scanId === idB) counts.b = data.count
+      else if (idC && data.scanId === idC) counts.c = data.count
+      setScanProgress({ ...counts })
+    })
+
+    try {
+      const [ra, rb, rc] = await Promise.all([
+        window.api.scanDirStart(idA, dps.a.trim()),
+        window.api.scanDirStart(idB, dps.b.trim()),
+        idC ? window.api.scanDirStart(idC, dps.c.trim()) : Promise.resolve(null),
+      ])
+
+      cleanup()
+      activeScanIds.current = []
+      setScanProgress(null)
+
+      if (ra.cancelled || rb.cancelled) { setStatus('스캔 취소됨'); return }
+      if (!ra.ok) { setStatus(`디렉토리 A 오류: ${ra.error}`); return }
+      if (!rb.ok) { setStatus(`디렉토리 B 오류: ${rb.error}`); return }
+      if (rc && !rc.ok) { setStatus(`디렉토리 C 오류: ${(rc as {ok:false;error?:string}).error}`); return }
+
+      const ea = ra.entries
+      const eb = rb.entries
+      const ec = rc && rc.ok ? rc.entries : undefined
+
+      const result = buildDirDiff(ea, eb, ec, dps.a.trim(), dps.b.trim(), dps.c.trim() || undefined)
+      setDirResult(result)
+
+      const changed = result.entries.filter(e => e.status !== 'equal').length
+      const conflicts = result.entries.filter(e => e.status === 'conflict').length
+      setStatus(
+        `디렉토리 전체 ${result.entries.length}개  변경 ${changed}개` +
+        (conflicts > 0 ? `  ★ 충돌 ${conflicts}개` : '')
+      )
+    } catch (e) {
+      cleanup()
+      activeScanIds.current = []
+      setScanProgress(null)
+      setStatus(`스캔 오류: ${String(e)}`)
     }
-
-    const [ea, eb, ec] = await Promise.all([
-      scanOrNull(dps.a), scanOrNull(dps.b), scanOrNull(dps.c)
-    ])
-    if (!ea || !eb) return
-
-    const result = buildDirDiff(ea, eb, ec ?? undefined, dps.a.trim(), dps.b.trim(), dps.c.trim() || undefined)
-    setDirResult(result)
-
-    const changed = result.entries.filter(e => e.status !== 'equal').length
-    const conflicts = result.entries.filter(e => e.status === 'conflict').length
-    setStatus(
-      `디렉토리 전체 ${result.entries.length}개  변경 ${changed}개` +
-      (conflicts > 0 ? `  ★ 충돌 ${conflicts}개` : '')
-    )
-  }, [dirPaths])
+  }, [dirPaths, cancelDirScan])
 
   // ── File open from DirView ──────────────────────────────────────────────────
 
@@ -176,7 +216,13 @@ export default function App() {
               <input type="text" value={dirPaths.c} onChange={e => setDirPaths(p => ({ ...p, c: e.target.value }))} placeholder="선택 (3-way)" />
               <button onClick={() => pickDir('c', 'Open Directory C')}>…</button>
             </div>
-            <button className="primary" onClick={() => runDirDiff()}>폴더 비교</button>
+            {scanProgress ? (
+              <button className="primary cancel" onClick={cancelDirScan}>
+                취소 (A:{scanProgress.a} B:{scanProgress.b}{scanProgress.c ? ` C:${scanProgress.c}` : ''})
+              </button>
+            ) : (
+              <button className="primary" onClick={() => runDirDiff()}>폴더 비교</button>
+            )}
           </div>
         )}
 

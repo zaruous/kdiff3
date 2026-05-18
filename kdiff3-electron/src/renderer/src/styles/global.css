@@ -48,6 +48,8 @@ button:active { background: var(--accent); }
 button:disabled { opacity: 0.4; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.primary:hover { background: var(--accent-hover); }
+button.primary.cancel { background: #b94040; border-color: #b94040; }
+button.primary.cancel:hover { background: #d94444; }
 
 input[type="text"], input[type="search"] {
   background: var(--bg3);
