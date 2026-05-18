@@ -135,6 +135,8 @@ impl MergeView {
         let blocks: Vec<MergeBlock> = merger.blocks.clone();
         let current = self.current_conflict;
 
+        let mut pending_resolve: Option<(usize, ResolvedChoice)> = None;
+
         ScrollArea::vertical().id_source("merge_scroll").show(ui, |ui| {
             for (idx, block) in blocks.iter().enumerate() {
                 let is_current = idx == current;
@@ -192,12 +194,14 @@ impl MergeView {
                         // 해결 버튼 (블록 바로 아래)
                         if resolved.is_none() {
                             ui.horizontal(|ui| {
-                                // 버튼 클릭 이벤트는 다음 프레임에 반영
                                 if ui.small_button("→ A").clicked() {
-                                    // 이벤트 수집 후 루프 밖에서 처리 (borrow 분리)
-                                    // egui에서는 immutable iterate + mutable resolve를 직접 할 수 없어
-                                    // 클릭 인덱스를 별도 저장해야 함.
-                                    // 여기서는 current_conflict를 이 idx로 설정 후 툴바에서 해결하도록 안내
+                                    pending_resolve = Some((idx, ResolvedChoice::A));
+                                }
+                                if ui.small_button("→ B").clicked() {
+                                    pending_resolve = Some((idx, ResolvedChoice::B));
+                                }
+                                if ui.small_button("→ C").clicked() {
+                                    pending_resolve = Some((idx, ResolvedChoice::C));
                                 }
                             });
                         }
@@ -214,6 +218,13 @@ impl MergeView {
                 }
             }
         });
+
+        if let Some((idx, choice)) = pending_resolve {
+            if let Some(m) = &mut self.merger {
+                m.resolve(idx, choice);
+            }
+            self.current_conflict = idx;
+        }
     }
 
     fn goto_next_conflict(&mut self) {

@@ -1,5 +1,6 @@
 mod app;
 mod diff_view;
+mod dir_view;
 mod merge_view;
 
 use clap::Parser;
