@@ -3,6 +3,12 @@ export type EntryStatus =
   | 'onlyA' | 'onlyB' | 'onlyC'
   | 'modified' | 'bModified' | 'cModified' | 'bcModified' | 'conflict'
 
+// How two files are declared equal:
+//   size+mtime — same size AND same modification time (default, conservative)
+//   size       — same size only; faster for large dirs where mtime is unreliable
+//   mtime      — same mtime only; useful when sizes are known to match
+export type DirCompareMode = 'size+mtime' | 'size' | 'mtime'
+
 export interface DirEntry {
   path: string        // relative path
   isDir: boolean
@@ -36,11 +42,22 @@ export function buildDirDiff(
   entriesC: FsEntry[] | undefined,
   baseA: string,
   baseB: string,
-  baseC?: string
+  baseC?: string,
+  mode: DirCompareMode = 'size+mtime'
 ): DirDiffResult {
   const mapA = new Map(entriesA.map(e => [e.path, e]))
   const mapB = new Map(entriesB.map(e => [e.path, e]))
   const mapC = entriesC ? new Map(entriesC.map(e => [e.path, e])) : undefined
+
+  // Core equality predicate — directories are always compared by child rollup,
+  // so skip the metadata check for them (scanner records size=0, mtime=0 for dirs).
+  const filesEq = (x: FsEntry, y: FsEntry): boolean => {
+    if (x.isDir) return true
+    if (x.size !== y.size) return false          // size differs → definitely modified
+    if (mode === 'size')    return true           // size match is sufficient
+    if (mode === 'mtime')   return x.mtime === y.mtime  // size already matched above
+    return x.mtime === y.mtime                   // size+mtime: both must match
+  }
 
   const allPaths = new Set([
     ...mapA.keys(),
@@ -53,9 +70,9 @@ export function buildDirDiff(
   for (const p of [...allPaths].sort()) {
     const a = mapA.get(p), b = mapB.get(p), c = mapC?.get(p)
 
-    const abEq = a && b ? (a.size === b.size && a.mtime === b.mtime) : false
-    const acEq = a && c ? (a.size === c.size && a.mtime === c.mtime) : false
-    const bcEq = b && c ? (b.size === c.size && b.mtime === c.mtime) : false
+    const abEq = a && b ? filesEq(a, b) : false
+    const acEq = a && c ? filesEq(a, c) : false
+    const bcEq = b && c ? filesEq(b, c) : false
 
     let status: EntryStatus
     const has = (x: unknown) => x !== undefined

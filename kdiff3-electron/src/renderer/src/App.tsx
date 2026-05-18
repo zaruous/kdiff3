@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { computeLineDiff, computeStats, DiffLine, DiffOptions } from './lib/diff'
 import { buildMerger, MergeResult, ResolvedChoice, resolveBlock, nextConflict, prevConflict } from './lib/merger'
-import { buildDirDiff, DirDiffResult } from './lib/dirDiff'
+import { buildDirDiff, DirDiffResult, DirCompareMode } from './lib/dirDiff'
 import DiffView from './components/DiffView'
 import MergeView from './components/MergeView'
 import DirView from './components/DirView'
@@ -25,6 +25,7 @@ export default function App() {
   const [options, setOptions] = useState<DiffOptions>({ ignoreWhitespace: false, ignoreCase: false })
   const [status, setStatus] = useState('파일 경로를 입력하고 비교 버튼을 누르세요.')
   const [scanProgress, setScanProgress] = useState<{ a: number; b: number; c: number } | null>(null)
+  const [dirCompareMode, setDirCompareMode] = useState<DirCompareMode>('size+mtime')
   const activeScanIds = useRef<string[]>([])
 
   // ── File comparison ─────────────────────────────────────────────────────────
@@ -111,14 +112,16 @@ export default function App() {
       const eb = rb.entries
       const ec = rc && rc.ok ? rc.entries : undefined
 
-      const result = buildDirDiff(ea, eb, ec, dps.a.trim(), dps.b.trim(), dps.c.trim() || undefined)
+      const result = buildDirDiff(ea, eb, ec, dps.a.trim(), dps.b.trim(), dps.c.trim() || undefined, dirCompareMode)
       setDirResult(result)
 
       const changed = result.entries.filter(e => e.status !== 'equal').length
       const conflicts = result.entries.filter(e => e.status === 'conflict').length
+      const modeLabel = dirCompareMode === 'size' ? '크기만' : dirCompareMode === 'mtime' ? '시간만' : '크기+시간'
       setStatus(
         `디렉토리 전체 ${result.entries.length}개  변경 ${changed}개` +
-        (conflicts > 0 ? `  ★ 충돌 ${conflicts}개` : '')
+        (conflicts > 0 ? `  ★ 충돌 ${conflicts}개` : '') +
+        `  [${modeLabel}]`
       )
     } catch (e) {
       cleanup()
@@ -126,7 +129,7 @@ export default function App() {
       setScanProgress(null)
       setStatus(`스캔 오류: ${String(e)}`)
     }
-  }, [dirPaths, cancelDirScan])
+  }, [dirPaths, cancelDirScan, dirCompareMode])
 
   // ── File open from DirView ──────────────────────────────────────────────────
 
@@ -215,6 +218,20 @@ export default function App() {
               <label>C</label>
               <input type="text" value={dirPaths.c} onChange={e => setDirPaths(p => ({ ...p, c: e.target.value }))} placeholder="선택 (3-way)" />
               <button onClick={() => pickDir('c', 'Open Directory C')}>…</button>
+            </div>
+            <div className="sep" />
+            <label className="compare-mode-label">비교 기준</label>
+            <div className="compare-mode-group">
+              {(['size+mtime', 'size', 'mtime'] as DirCompareMode[]).map(m => (
+                <button
+                  key={m}
+                  className={`mode-btn${dirCompareMode === m ? ' active' : ''}`}
+                  onClick={() => setDirCompareMode(m)}
+                  title={m === 'size+mtime' ? '크기와 수정시간 모두 일치 시 동일' : m === 'size' ? '크기만 일치 시 동일 (대용량 권장)' : '수정시간만 일치 시 동일'}
+                >
+                  {m === 'size+mtime' ? '크기+시간' : m === 'size' ? '크기만' : '시간만'}
+                </button>
+              ))}
             </div>
             {scanProgress ? (
               <button className="primary cancel" onClick={cancelDirScan}>

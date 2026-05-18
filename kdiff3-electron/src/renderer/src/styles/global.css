@@ -51,6 +51,18 @@ button.primary:hover { background: var(--accent-hover); }
 button.primary.cancel { background: #b94040; border-color: #b94040; }
 button.primary.cancel:hover { background: #d94444; }
 
+.compare-mode-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.compare-mode-group { display: flex; gap: 0; }
+.mode-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 0;
+  border-right-width: 0;
+}
+.mode-btn:first-child { border-radius: 3px 0 0 3px; }
+.mode-btn:last-child  { border-radius: 0 3px 3px 0; border-right-width: 1px; }
+.mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 input[type="text"], input[type="search"] {
   background: var(--bg3);
   border: 1px solid var(--border);
