@@ -218,7 +218,7 @@ export default function App() {
 
         {tab === 'dir' && (
           dirResult ? (
-            <DirView result={dirResult} onOpenFile={handleOpenFile} />
+            <DirView result={dirResult} onOpenFile={handleOpenFile} onRefresh={() => runDirDiff()} />
           ) : (
             <div className="empty-state">디렉토리 경로를 입력하고 폴더 비교 버튼을 누르세요.</div>
           )

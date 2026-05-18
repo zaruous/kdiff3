@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
-import { join } from 'path'
-import { readFileSync, statSync, readdirSync, writeFileSync } from 'fs'
+import { join, dirname } from 'path'
+import { readFileSync, statSync, readdirSync, writeFileSync, cpSync, mkdirSync } from 'fs'
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -78,6 +78,21 @@ ipcMain.handle('read-file', (_evt, path: string) => {
 ipcMain.handle('write-file', (_evt, path: string, content: string) => {
   try {
     writeFileSync(path, content, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('copy-path', (_evt, src: string, dst: string) => {
+  try {
+    mkdirSync(dirname(dst), { recursive: true })
+    const st = statSync(src)
+    if (st.isDirectory()) {
+      cpSync(src, dst, { recursive: true })
+    } else {
+      cpSync(src, dst)
+    }
     return { ok: true }
   } catch (e) {
     return { ok: false, error: String(e) }
