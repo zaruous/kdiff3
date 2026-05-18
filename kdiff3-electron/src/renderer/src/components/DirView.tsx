@@ -2,6 +2,9 @@ import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { DirDiffResult, EntryStatus, statusColor, fmtSize, fmtTime } from '../lib/dirDiff'
 import { buildTree, flattenTree, TreeRow } from '../lib/treeBuilder'
 import { generateHtmlReport } from '../lib/htmlReport'
+import { VList } from './VList'
+
+const TREE_ROW_H = 22  // must match .tree-row height in CSS
 
 interface Props {
   result: DirDiffResult
@@ -38,14 +41,14 @@ interface PanelProps {
   onToggleExpand: (path: string) => void
   onOpenFile: (path: string) => void
   scrollRef: (el: HTMLDivElement | null) => void
-  onScroll: () => void
+  onScroll: (scrollTop: number) => void
 }
 
 function TreePanel({ side, baseDir, rows, selectedPath, expandedSet, onSelect, onToggleExpand, onOpenFile, scrollRef, onScroll }: PanelProps) {
   const hasThis = side === 'A' ? (r: TreeRow) => r.hasInA : (r: TreeRow) => r.hasInB
 
   return (
-    <div className="tree-panel" ref={scrollRef} onScroll={onScroll}>
+    <div className="tree-panel-wrap">
       <div className="tree-panel-header">
         <span style={{ fontWeight: 600, color: side === 'A' ? '#f28b82' : '#81c995' }}>
           {side === 'A' ? '◀ A' : 'B ▶'}
@@ -55,51 +58,49 @@ function TreePanel({ side, baseDir, rows, selectedPath, expandedSet, onSelect, o
         </span>
       </div>
 
-      {rows.map(row => {
-        const exists = hasThis(row)
-        const isSelected = row.path === selectedPath
-        const isExpanded = expandedSet.has(row.path)
+      <VList
+        items={rows}
+        rowHeight={TREE_ROW_H}
+        className="tree-panel"
+        scrollRef={scrollRef}
+        onScroll={onScroll}
+        renderItem={(row) => {
+          const exists = hasThis(row)
+          const isSelected = row.path === selectedPath
+          const isExpanded = expandedSet.has(row.path)
 
-        return (
-          <div
-            key={row.path}
-            className={`tree-row${isSelected ? ' selected' : ''}${!exists ? ' ghost' : ''}`}
-            style={{ paddingLeft: 8 + row.depth * 16 }}
-            onClick={() => {
-              if (!exists) return
-              if (row.isDir) onToggleExpand(row.path)
-              else { onSelect(row.path, false); onOpenFile(row.path) }
-            }}
-            onContextMenu={() => onSelect(row.path, row.isDir)}
-          >
-            {/* Expand toggle */}
-            <span className="tree-expand" onClick={e => { e.stopPropagation(); onToggleExpand(row.path) }}>
-              {row.isDir ? (isExpanded ? '▼' : '▶') : ' '}
-            </span>
-
-            {/* Icon + name */}
-            <span className="tree-icon">{row.isDir ? '📁' : '📄'}</span>
-            <span className="tree-name" style={{ color: exists ? 'var(--text)' : 'var(--text-dim)' }}>
-              {row.name}
-            </span>
-
-            {/* Changed count for dirs */}
-            {row.isDir && row.childrenChanged > 0 && exists && (
-              <span className="tree-count">{row.childrenChanged}</span>
-            )}
-
-            {/* Size (for files) */}
-            {!row.isDir && exists && (
-              <span className="tree-size">
-                {fmtSize(side === 'A' ? row.sizeA : row.sizeB)}
+          return (
+            <div
+              key={row.path}
+              className={`tree-row${isSelected ? ' selected' : ''}${!exists ? ' ghost' : ''}`}
+              style={{ paddingLeft: 8 + row.depth * 16 }}
+              onClick={() => {
+                if (!exists) return
+                if (row.isDir) onToggleExpand(row.path)
+                else { onSelect(row.path, false); onOpenFile(row.path) }
+              }}
+              onContextMenu={() => onSelect(row.path, row.isDir)}
+            >
+              <span className="tree-expand" onClick={e => { e.stopPropagation(); onToggleExpand(row.path) }}>
+                {row.isDir ? (isExpanded ? '▼' : '▶') : ' '}
               </span>
-            )}
-
-            {/* Status badge */}
-            <StatusBadge status={row.status} />
-          </div>
-        )
-      })}
+              <span className="tree-icon">{row.isDir ? '📁' : '📄'}</span>
+              <span className="tree-name" style={{ color: exists ? 'var(--text)' : 'var(--text-dim)' }}>
+                {row.name}
+              </span>
+              {row.isDir && row.childrenChanged > 0 && exists && (
+                <span className="tree-count">{row.childrenChanged}</span>
+              )}
+              {!row.isDir && exists && (
+                <span className="tree-size">
+                  {fmtSize(side === 'A' ? row.sizeA : row.sizeB)}
+                </span>
+              )}
+              <StatusBadge status={row.status} />
+            </div>
+          )
+        }}
+      />
     </div>
   )
 }
@@ -131,15 +132,25 @@ export default function DirView({ result, onOpenFile, onRefresh }: Props) {
 
   // ── Synchronized scroll ───────────────────────────────────────────────────
 
-  const leftRef = useRef<HTMLDivElement | null>(null)
+  const leftRef  = useRef<HTMLDivElement | null>(null)
   const rightRef = useRef<HTMLDivElement | null>(null)
-  const syncing = useRef(false)
+  const syncing  = useRef(false)
 
-  const syncScroll = useCallback((src: HTMLDivElement | null, dst: HTMLDivElement | null) => () => {
-    if (syncing.current || !src || !dst) return
+  const onLeftScroll = useCallback((scrollTop: number) => {
+    if (syncing.current) return
+    const dst = rightRef.current
+    if (!dst || Math.abs(dst.scrollTop - scrollTop) <= 0.5) return
     syncing.current = true
-    dst.scrollTop = src.scrollTop
-    dst.scrollLeft = src.scrollLeft
+    dst.scrollTop = scrollTop
+    syncing.current = false
+  }, [])
+
+  const onRightScroll = useCallback((scrollTop: number) => {
+    if (syncing.current) return
+    const dst = leftRef.current
+    if (!dst || Math.abs(dst.scrollTop - scrollTop) <= 0.5) return
+    syncing.current = true
+    dst.scrollTop = scrollTop
     syncing.current = false
   }, [])
 
@@ -286,7 +297,7 @@ export default function DirView({ result, onOpenFile, onRefresh }: Props) {
           onToggleExpand={toggleExpand}
           onOpenFile={openSelectedFile}
           scrollRef={el => { leftRef.current = el }}
-          onScroll={syncScroll(leftRef.current, rightRef.current)}
+          onScroll={onLeftScroll}
         />
 
         <div className="tree-divider" />
@@ -301,7 +312,7 @@ export default function DirView({ result, onOpenFile, onRefresh }: Props) {
           onToggleExpand={toggleExpand}
           onOpenFile={openSelectedFile}
           scrollRef={el => { rightRef.current = el }}
-          onScroll={syncScroll(rightRef.current, leftRef.current)}
+          onScroll={onRightScroll}
         />
       </div>
 

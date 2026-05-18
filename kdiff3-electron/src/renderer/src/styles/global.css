@@ -174,9 +174,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 .diff-panels.threeway { grid-template-columns: 1fr 1fr 1fr; }
 
+/* overflow is handled by VList; border only */
 .diff-panel {
-  overflow-y: auto;
-  overflow-x: auto;
   border-right: 1px solid var(--border);
 }
 .diff-panel:last-child { border-right: none; }
@@ -184,11 +183,12 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .diff-line {
   display: flex;
   align-items: baseline;
-  min-height: 20px;
+  height: 20px;
   font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-size: 12.5px;
   line-height: 20px;
   white-space: pre;
+  overflow: hidden;
 }
 
 .diff-line-num {
@@ -449,17 +449,24 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 .tree-divider:hover { background: var(--accent); }
 
+/* Wrapper: header + virtualized list stacked vertically */
+.tree-panel-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* VList container inside the wrap */
 .tree-panel {
   flex: 1;
-  overflow: auto;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
   font-size: 12.5px;
 }
 
 .tree-panel-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  flex-shrink: 0;
   background: var(--bg3);
   border-bottom: 1px solid var(--border);
   padding: 5px 10px;

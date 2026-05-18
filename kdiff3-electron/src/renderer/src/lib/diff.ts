@@ -24,49 +24,92 @@ export interface DiffStats {
   changes: number
 }
 
-// ── LCS core ─────────────────────────────────────────────────────────────────
+// ── Myers O(n·d) diff ──────────────────────────────────────────────────────────
+// Time O(n·d), space O(n+m) + O(d²) for compact trace.
+// Falls back to naive heuristic when d > D_LIMIT.
 
-function lcsBacktrack(a: string[], b: string[]): Array<'equal' | 'delete' | 'insert'> {
-  const m = a.length, n = b.length
-  // Cap for very large files to avoid OOM
-  if (m > 8000 || n > 8000) return largeFileDiff(a, b)
+type Op = 'equal' | 'delete' | 'insert'
 
-  const dp = new Int32Array((m + 1) * (n + 1))
-  for (let i = m - 1; i >= 0; i--) {
-    for (let j = n - 1; j >= 0; j--) {
-      const k = i * (n + 1) + j
-      dp[k] = a[i] === b[j]
-        ? 1 + dp[(i + 1) * (n + 1) + (j + 1)]
-        : Math.max(dp[(i + 1) * (n + 1) + j], dp[i * (n + 1) + (j + 1)])
-    }
-  }
+const D_LIMIT = 2000
 
-  const ops: Array<'equal' | 'delete' | 'insert'> = []
-  let i = 0, j = 0
-  while (i < m || j < n) {
-    if (i < m && j < n && a[i] === b[j]) {
-      ops.push('equal'); i++; j++
-    } else if (j < n && (i >= m || dp[i * (n + 1) + (j + 1)] >= dp[(i + 1) * (n + 1) + j])) {
-      ops.push('insert'); j++
-    } else {
-      ops.push('delete'); i++
-    }
-  }
-  return ops
-}
+function myersDiff(a: string[], b: string[]): Op[] {
+  const n = a.length, m = b.length
 
-// Fast heuristic for large files: split into equal prefix/suffix, diff middle
-function largeFileDiff(a: string[], b: string[]): Array<'equal' | 'delete' | 'insert'> {
+  // Strip common prefix
   let lo = 0
-  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++
-  let ai = a.length - 1, bi = b.length - 1
-  while (ai > lo && bi > lo && a[ai] === b[bi]) { ai--; bi-- }
+  while (lo < n && lo < m && a[lo] === b[lo]) lo++
+  if (lo === n && lo === m) return new Array<Op>(n).fill('equal')
 
-  const prefix: Array<'equal' | 'delete' | 'insert'> = Array(lo).fill('equal')
-  const midA = a.slice(lo, ai + 1), midB = b.slice(lo, bi + 1)
-  const mid = midA.map(() => 'delete' as const).concat(midB.map(() => 'insert' as const))
-  const suffix: Array<'equal' | 'delete' | 'insert'> = Array(a.length - ai - 1).fill('equal')
-  return [...prefix, ...mid, ...suffix]
+  // Strip common suffix
+  let hiA = n, hiB = m
+  while (hiA > lo && hiB > lo && a[hiA - 1] === b[hiB - 1]) { hiA--; hiB-- }
+
+  const A = a.slice(lo, hiA), B = b.slice(lo, hiB)
+  const N = A.length, M = B.length
+  const pre: Op[] = new Array(lo).fill('equal')
+  const suf: Op[] = new Array(n - hiA).fill('equal')
+
+  if (N === 0) return [...pre, ...new Array<Op>(M).fill('insert'), ...suf]
+  if (M === 0) return [...pre, ...new Array<Op>(N).fill('delete'), ...suf]
+
+  const maxD = N + M
+  const off = maxD + 1
+  const v = new Int32Array(2 * maxD + 4)
+  v[off + 1] = 0
+
+  // parityTrace[d] = V[k] for k ∈ {-d, -d+2, ..., d} AFTER processing depth d.
+  // At depth d, valid k's have parity d. For backtracking at depth d we need
+  // parityTrace[d-1] (parity d-1 values) to reconstruct the move direction.
+  // Total storage: sum_{d=0}^{D-1} (d+1) = D*(D+1)/2 Int32 values ≤ 2MB at D=2000.
+  const pt: Int32Array[] = []
+
+  let ed = -1
+  outer: for (let d = 0; d <= maxD; d++) {
+    if (d > D_LIMIT) break
+    for (let k = -d; k <= d; k += 2) {
+      const dn = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])
+      let x = dn ? v[off + k + 1] : v[off + k - 1] + 1
+      let y = x - k
+      while (x < N && y < M && A[x] === B[y]) { x++; y++ }
+      v[off + k] = x
+      if (x >= N && y >= M) { ed = d; break outer }
+    }
+    // Snapshot: saved after depth d, used for backtracking at depth d+1.
+    // Index i = (k + d) >> 1 maps k ∈ {-d, -d+2, ..., d} → i ∈ {0, 1, ..., d}.
+    const snap = new Int32Array(d + 1)
+    for (let k = -d, i = 0; k <= d; k += 2, i++) snap[i] = v[off + k]
+    pt.push(snap)
+  }
+
+  if (ed < 0) {
+    // Edit distance exceeded budget; fall back to all-delete then all-insert.
+    return [...pre, ...new Array<Op>(N).fill('delete'), ...new Array<Op>(M).fill('insert'), ...suf]
+  }
+
+  // Backtrack through compact trace to reconstruct edit script in reverse.
+  const ops: Op[] = []
+  let x = N, y = M
+  for (let d = ed; d > 0; d--) {
+    // snap = pt[d-1] holds parity-(d-1) values in range [-(d-1), d-1].
+    // Index for k': i = (k' + d - 1) >> 1
+    const snap = pt[d - 1]
+    const k = x - y
+    const vm1 = k > -d ? snap[(k - 1 + d - 1) >> 1] : -1
+    const vp1 = k <  d ? snap[(k + 1 + d - 1) >> 1] : -1
+    const dn = k === -d || (k !== d && vm1 < vp1)
+    const px = dn ? vp1 : vm1
+    const pk = dn ? k + 1 : k - 1
+    const py = px - pk
+    // Undo snake from (dn ? px : px+1, midY) → (x, y), then undo the edit.
+    for (let i = (dn ? px : px + 1); i < x; i++) ops.push('equal')
+    ops.push(dn ? 'insert' : 'delete')
+    x = px; y = py
+  }
+  // Leading snake at edit depth 0
+  for (let i = 0; i < x; i++) ops.push('equal')
+  ops.reverse()
+
+  return [...pre, ...ops, ...suf]
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -84,27 +127,22 @@ export function computeLineDiff(
 ): DiffLine[] {
   const a = rawA.map(l => normalize(l, opts))
   const b = rawB.map(l => normalize(l, opts))
-  const ops = lcsBacktrack(a, b)
+  const ops = myersDiff(a, b)
 
   const lines: DiffLine[] = []
-  let ia = 0, ib = 0
+  let ia = 0, ib = 0, p = 0
 
-  // Group consecutive ops to pair deletes+inserts as 'changed'
-  let p = 0
   while (p < ops.length) {
     if (ops[p] === 'equal') {
       lines.push({ type: 'equal', numA: ia + 1, numB: ib + 1, textA: rawA[ia], textB: rawB[ib] })
       ia++; ib++; p++
     } else {
-      // Collect a block of deletes and inserts
       let delCount = 0, insCount = 0
-      const blockStart = p
       while (p < ops.length && ops[p] !== 'equal') {
         if (ops[p] === 'delete') delCount++
         else insCount++
         p++
       }
-      // Pair them as 'changed', remainder as one-sided
       const paired = Math.min(delCount, insCount)
       for (let k = 0; k < paired; k++) {
         lines.push({ type: 'changed', numA: ia + k + 1, numB: ib + k + 1, textA: rawA[ia + k], textB: rawB[ib + k] })
@@ -115,7 +153,6 @@ export function computeLineDiff(
       for (let k = paired; k < insCount; k++) {
         lines.push({ type: 'insert', numB: ib + k + 1, textA: '', textB: rawB[ib + k] })
       }
-      void blockStart
       ia += delCount; ib += insCount
     }
   }
@@ -141,7 +178,7 @@ function tokenizeWords(text: string): string[] {
 export function computeWordDiff(textA: string, textB: string): { a: WordToken[], b: WordToken[] } {
   const wa = tokenizeWords(textA)
   const wb = tokenizeWords(textB)
-  const ops = lcsBacktrack(wa, wb)
+  const ops = myersDiff(wa, wb)
 
   const tokA: WordToken[] = []
   const tokB: WordToken[] = []
